@@ -7,6 +7,7 @@ import ConflictError from '../errors/conflict-error'
 import NotFoundError from '../errors/not-found-error'
 import Product from '../models/product'
 import movingFile from '../utils/movingFile'
+import sanitizeText from '../utils/sanitize'
 
 // GET /product
 const getProducts = async (req: Request, res: Response, next: NextFunction) => {
@@ -52,11 +53,11 @@ const createProduct = async (
         }
 
         const product = await Product.create({
-            description,
+            description: sanitizeText(description),
             image,
-            category,
+            category: sanitizeText(category),
             price,
-            title,
+            title: sanitizeText(title),
         })
         return res.status(constants.HTTP_STATUS_CREATED).send(product)
     } catch (error) {
@@ -72,7 +73,6 @@ const createProduct = async (
     }
 }
 
-// TODO: Добавить guard admin
 // PUT /product
 const updateProduct = async (
     req: Request,
@@ -81,7 +81,7 @@ const updateProduct = async (
 ) => {
     try {
         const { productId } = req.params
-        const { image } = req.body
+        const { image, title, description, category, price } = req.body
 
         // Переносим картинку из временной папки
         if (image) {
@@ -92,15 +92,19 @@ const updateProduct = async (
             )
         }
 
+        const update: Record<string, unknown> = {
+            price: price || null,
+        }
+        if (image) update.image = image
+        if (title !== undefined) update.title = sanitizeText(title)
+        if (description !== undefined) {
+            update.description = sanitizeText(description)
+        }
+        if (category !== undefined) update.category = sanitizeText(category)
+
         const product = await Product.findByIdAndUpdate(
             productId,
-            {
-                $set: {
-                    ...req.body,
-                    price: req.body.price ? req.body.price : null,
-                    image: req.body.image ? req.body.image : undefined,
-                },
-            },
+            { $set: update },
             { runValidators: true, new: true }
         ).orFail(() => new NotFoundError('Нет товара по заданному id'))
         return res.send(product)
@@ -120,7 +124,6 @@ const updateProduct = async (
     }
 }
 
-// TODO: Добавить guard admin
 // DELETE /product
 const deleteProduct = async (
     req: Request,

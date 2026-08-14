@@ -5,6 +5,8 @@ import NotFoundError from '../errors/not-found-error'
 import Order, { IOrder } from '../models/order'
 import Product, { IProduct } from '../models/product'
 import User from '../models/user'
+import escapeRegExp from '../utils/escapeRegExp'
+import sanitizeText from '../utils/sanitize'
 
 // eslint-disable-next-line max-len
 // GET /orders?page=2&limit=5&sort=totalAmount&order=desc&orderDateFrom=2024-07-01&orderDateTo=2024-08-01&status=delivering&totalAmountFrom=100&totalAmountTo=1000&search=%2B1
@@ -30,13 +32,8 @@ export const getOrders = async (
 
         const filters: FilterQuery<Partial<IOrder>> = {}
 
-        if (status) {
-            if (typeof status === 'object') {
-                Object.assign(filters, status)
-            }
-            if (typeof status === 'string') {
-                filters.status = status
-            }
+        if (typeof status === 'string') {
+            filters.status = status
         }
 
         if (totalAmountFrom) {
@@ -89,11 +86,13 @@ export const getOrders = async (
             { $unwind: '$products' },
         ]
 
-        if (search) {
-            const searchRegex = new RegExp(search as string, 'i')
+        if (typeof search === 'string' && search) {
+            const searchRegex = new RegExp(escapeRegExp(search), 'i')
             const searchNumber = Number(search)
 
-            const searchConditions: any[] = [{ 'products.title': searchRegex }]
+            const searchConditions: FilterQuery<Partial<IOrder>>[] = [
+                { 'products.title': searchRegex },
+            ]
 
             if (!Number.isNaN(searchNumber)) {
                 searchConditions.push({ orderNumber: searchNumber })
@@ -108,10 +107,18 @@ export const getOrders = async (
             filters.$or = searchConditions
         }
 
-        const sort: { [key: string]: any } = {}
+        const allowedSortFields = [
+            'createdAt',
+            'totalAmount',
+            'orderNumber',
+            'status',
+        ]
+        const sort: Record<string, 1 | -1> = {}
 
-        if (sortField && sortOrder) {
+        if (allowedSortFields.includes(sortField as string)) {
             sort[sortField as string] = sortOrder === 'desc' ? -1 : 1
+        } else {
+            sort.createdAt = -1
         }
 
         aggregatePipeline.push(
@@ -183,9 +190,8 @@ export const getOrdersCurrentUser = async (
 
         let orders = user.orders as unknown as IOrder[]
 
-        if (search) {
-            // если не экранировать то получаем Invalid regular expression: /+1/i: Nothing to repeat
-            const searchRegex = new RegExp(search as string, 'i')
+        if (typeof search === 'string' && search) {
+            const searchRegex = new RegExp(escapeRegExp(search), 'i')
             const searchNumber = Number(search)
             const products = await Product.find({ title: searchRegex })
             const productIds = products.map((product) => product._id)
@@ -315,9 +321,9 @@ export const createOrder = async (
             payment,
             phone,
             email,
-            comment,
+            comment: sanitizeText(comment),
             customer: userId,
-            deliveryAddress: address,
+            deliveryAddress: sanitizeText(address),
         })
         const populateOrder = await newOrder.populate(['customer', 'products'])
         await populateOrder.save()
