@@ -53,12 +53,45 @@ class Api {
                   )
     }
 
+    private csrfToken: string | null = null
+
+    private async getCsrfToken(): Promise<string> {
+        if (this.csrfToken) {
+            return this.csrfToken
+        }
+        const res = await fetch(`${this.baseUrl}/auth/csrf-token`, {
+            method: 'GET',
+            credentials: 'include',
+        })
+        const data = await this.handleResponse<{ csrfToken: string }>(res)
+        this.csrfToken = data.csrfToken
+        return this.csrfToken
+    }
+
     protected async request<T>(endpoint: string, options: RequestInit) {
         try {
+            const method = (options.method ?? 'GET').toUpperCase()
+            const needsCsrf = !['GET', 'HEAD', 'OPTIONS'].includes(method)
+            const headers: Record<string, string> = {
+                ...((this.options.headers as Record<string, string>) ?? {}),
+                ...((options.headers as Record<string, string>) ?? {}),
+            }
+
+            if (needsCsrf) {
+                headers['x-csrf-token'] = await this.getCsrfToken()
+            }
+
             const res = await fetch(`${this.baseUrl}${endpoint}`, {
                 ...this.options,
                 ...options,
+                headers,
+                credentials: 'include',
             })
+
+            if (res.status === 403 && needsCsrf) {
+                this.csrfToken = null
+            }
+
             return await this.handleResponse<T>(res)
         } catch (error) {
             return Promise.reject(error)
